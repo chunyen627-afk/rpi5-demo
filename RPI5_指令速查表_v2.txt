@@ -1,0 +1,215 @@
+================================================================
+  RPI5 AI 展示系統 — 指令速查表
+  路徑: /home/p400/rpi5-demo/
+  使用者: p400
+================================================================
+
+----------------------------------------------------------------
+【第一步】從電腦把專案傳到 RPI5（在你的電腦上執行）
+----------------------------------------------------------------
+
+# 傳整個資料夾
+scp -r rpi5-demo/ p400@rpi5-demo.local:/home/p400/
+
+# 或用 IP（若 .local 找不到）
+scp -r rpi5-demo/ p400@192.168.x.x:/home/p400/
+
+# 傳你的 GGUF 模型
+scp your-270m-model.gguf p400@rpi5-demo.local:/home/p400/rpi5-demo/models/
+
+
+----------------------------------------------------------------
+【第二步】SSH 進入 RPI5
+----------------------------------------------------------------
+
+ssh p400@rpi5-demo.local
+
+# 或
+ssh p400@192.168.x.x
+
+
+----------------------------------------------------------------
+【第三步】安裝系統（只需做一次）
+----------------------------------------------------------------
+
+cd /home/p400/rpi5-demo
+
+# 安裝：Python 套件 + WiFi 熱點 + systemd 自啟 + 螢幕常亮
+sudo bash setup_system.sh
+
+# 確認安裝結果
+pip show llama-cpp-python fastapi uvicorn qrcode
+nmcli connection show rpi5-hotspot
+systemctl status rpi5-demo
+
+
+----------------------------------------------------------------
+【第四步】確認模型已放好
+----------------------------------------------------------------
+
+ls -lh /home/p400/rpi5-demo/models/
+
+# 確認 system_prompt.txt 存在
+cat /home/p400/rpi5-demo/system_prompt.txt
+
+
+----------------------------------------------------------------
+【第五步】HTTPS 憑證設定（RPI5 接網路線，只需一次）
+----------------------------------------------------------------
+09663af9-ad64-4f30-bb4f-79d279d5e707
+# ⚠️  Windows 用戶請直接在 RPI5 上產生憑證（gen_cert.sh 不支援 Windows）
+
+# Step 1: SSH 進 RPI5 後安裝 certbot
+sudo apt update && sudo apt install -y certbot
+
+# Step 2: 申請憑證
+sudo certbot certonly \
+  --manual \
+  --preferred-challenges dns \
+  --agree-tos \
+  --email your@email.com \
+  -d rpi5demo.duckdns.org
+
+# certbot 暫停時：
+#   去 https://www.duckdns.org
+#   找到 rpi5demo，在「current txt」欄位貼上驗證碼
+#   按「update txt」
+#   回到 RPI5 終端按 Enter
+# → 憑證自動存到 /etc/letsencrypt/live/rpi5demo.duckdns.org/
+
+# Step 3: 確認憑證到期日
+openssl x509 -enddate -noout -in /etc/letsencrypt/live/rpi5demo.duckdns.org/fullchain.pem
+
+# Step 4: 設定 HTTPS（先改 setup_https.sh 裡的網域名稱）
+nano /home/p400/rpi5-demo/setup_https.sh
+# 修改：DEMO_DOMAIN="rpi5demo.duckdns.org"
+
+sudo bash /home/p400/rpi5-demo/setup_https.sh
+
+
+----------------------------------------------------------------
+【第六步】測試（手動啟動，排除問題用）
+----------------------------------------------------------------
+
+# ⚠️  重要：先停止背景服務，避免 Port 8000 衝突
+sudo systemctl stop rpi5-demo
+
+# 手動啟動（可看到完整 Log）
+cd /home/p400/rpi5-demo && python3 server.py
+
+# 另開一個終端確認可以連線
+curl http://localhost:8000/info
+
+# 測試完按 Ctrl+C 停止，再重啟背景服務
+sudo systemctl start rpi5-demo
+
+
+----------------------------------------------------------------
+【第七步】展示前確認清單
+----------------------------------------------------------------
+
+# 確認 GGUF 模型存在
+ls -lh /home/p400/rpi5-demo/models/
+
+# 確認憑證有效（不能過期）
+openssl x509 -enddate -noout -in /etc/letsencrypt/live/rpi5demo.duckdns.org/fullchain.pem
+
+# 確認服務正常運行
+systemctl status rpi5-demo
+
+# 確認 WiFi 熱點正常
+nmcli connection show rpi5-hotspot
+
+# 查看目前溫度（建議 < 70°C）
+vcgencmd measure_temp
+
+# 查看記憶體使用
+free -h
+
+# 查看連線人數與系統狀態
+curl http://localhost:8000/stats
+
+# 查看對外 URL
+curl http://localhost:8000/info
+
+# 重開機測試（確認開機自啟都正常）
+sudo reboot
+
+
+----------------------------------------------------------------
+【展示當天】開啟展示螢幕
+----------------------------------------------------------------
+
+# 開啟 /display 頁面（Kiosk 全螢幕模式）
+./start_demo.sh
+
+# 或手動開啟（在 RPI5 有桌面的終端執行）
+DISPLAY=:0 chromium-browser --kiosk --incognito --noerrdialogs http://localhost:8000/display &
+
+
+----------------------------------------------------------------
+【服務管理】
+----------------------------------------------------------------
+
+# 重啟服務
+sudo systemctl restart rpi5-demo
+
+# 停止服務
+sudo systemctl stop rpi5-demo
+
+# 啟動服務
+sudo systemctl start rpi5-demo
+
+# 即時查看 Log
+sudo journalctl -u rpi5-demo -f
+
+# 查看最近 50 行 Log
+sudo journalctl -u rpi5-demo --lines=50
+
+# 重啟 nginx（HTTPS）
+sudo systemctl restart nginx
+
+# 重啟 dnsmasq（DNS）
+sudo systemctl restart dnsmasq
+
+
+----------------------------------------------------------------
+【問題排除】
+----------------------------------------------------------------
+
+# Port 8000 已被佔用 → 停掉背景服務
+sudo systemctl stop rpi5-demo
+sudo fuser -k 8000/tcp
+
+# WiFi 熱點沒啟動
+sudo nmcli connection up rpi5-hotspot
+
+# nginx 設定有問題
+sudo nginx -t
+sudo systemctl status nginx
+
+# 憑證快到期（90 天更新一次）
+sudo certbot renew
+sudo systemctl restart nginx
+
+# 查看 RPI5 IP
+hostname -I
+
+# 清除 Journal Log（SD 卡空間不足時）
+sudo journalctl --vacuum-size=50M
+
+
+----------------------------------------------------------------
+【附錄】WiFi 熱點資訊
+----------------------------------------------------------------
+
+SSID    : RPI5-Demo
+密碼    : demo1234
+RPI5 IP : 192.168.4.1
+伺服器  : http://192.168.4.1:8000
+展示頁  : http://192.168.4.1:8000/display
+
+
+----------------------------------------------------------------
+  最後更新：配合 server.py v2 / display.html 網頁變色版本
+================================================================
