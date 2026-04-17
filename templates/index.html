@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AI 語音助理 · RPI5</title>
+<style>
+  :root {
+    --bg:     #07070f;
+    --bg2:    #0e0e1c;
+    --bg3:    #16162a;
+    --cyan:   #00d4e0;
+    --cyan2:  #00a8b8;
+    --purple: #7c5cfc;
+    --text:   #e8eaf6;
+    --muted:  #8892b0;
+    --user-bg:#1a1a2e;
+    --ai-bg:  #0e1628;
+    --r:      16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: -apple-system, 'PingFang TC', 'Heiti TC', 'Microsoft JhengHei', sans-serif; }
+
+  /* ── Layout ── */
+  #app { display: flex; flex-direction: column; height: 100dvh; max-width: 480px; margin: 0 auto; }
+
+  /* ── Header ── */
+  header {
+    padding: 18px 20px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: pulse-dot 2s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .logo-text { font-size: 15px; font-weight: 600; letter-spacing: .04em; color: var(--text); }
+  .logo-sub  { font-size: 11px; color: var(--muted); }
+  #status-badge {
+    font-size: 11px; padding: 4px 10px; border-radius: 20px;
+    background: rgba(0,212,224,0.1); color: var(--cyan);
+    border: 1px solid rgba(0,212,224,0.2);
+    transition: all .3s;
+  }
+  #status-badge.error    { background: rgba(255,70,70,0.1);  color:#ff6b6b; border-color:rgba(255,70,70,0.2); }
+  #status-badge.thinking { background: rgba(124,92,252,0.1); color:var(--purple); border-color:rgba(124,92,252,0.2); }
+
+  /* ── Messages ── */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 20px 16px; display: flex;
+    flex-direction: column; gap: 14px;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  #messages::-webkit-scrollbar { display: none; }
+
+  .bubble {
+    max-width: 85%; padding: 12px 16px; border-radius: var(--r);
+    font-size: 15px; line-height: 1.6;
+    animation: slide-up .25s ease-out;
+  }
+  @keyframes slide-up { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+
+  .bubble.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #1a1a3a, #1e1e42);
+    border: 1px solid rgba(124,92,252,0.25);
+    color: #c8caff;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.ai {
+    align-self: flex-start;
+    background: var(--ai-bg);
+    border: 1px solid rgba(0,212,224,0.15);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+    min-width: 60px;
+  }
+  .bubble.broadcast {
+    align-self: center;
+    background: rgba(0,212,224,0.06);
+    border: 1px dashed rgba(0,212,224,0.25);
+    color: var(--cyan); font-size: 13px; font-style: italic;
+    max-width: 95%; text-align: center; border-radius: 8px;
+  }
+  .bubble.ai.streaming::after {
+    content: '▊'; animation: blink .7s step-end infinite; color: var(--cyan); font-size: 12px; margin-left: 2px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .bubble-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+
+  /* ── Empty state ── */
+  #empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; gap: 10px; color: var(--muted); text-align: center; padding: 20px;
+  }
+  #empty-state .hint-icon { font-size: 36px; opacity: .4; }
+  #empty-state p { font-size: 14px; line-height: 1.6; max-width: 220px; }
+  .hint-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+  .hint-chip {
+    font-size: 12px; padding: 6px 12px; border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.1); color: var(--muted);
+    cursor: pointer; transition: all .2s; background: var(--bg2);
+  }
+  .hint-chip:active { background: var(--bg3); border-color: var(--cyan); color: var(--cyan); }
+
+  /* ── Mic area ── */
+  #mic-area {
+    padding: 20px 20px 28px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+    background: var(--bg);
+    border-top: 1px solid rgba(255,255,255,0.05);
+    flex-shrink: 0;
+  }
+
+  /* Waveform (visible while listening) */
+  #waveform {
+    display: flex; align-items: center; gap: 3px; height: 28px;
+    opacity: 0; transition: opacity .3s;
+  }
+  #waveform.active { opacity: 1; }
+  #waveform span {
+    display: block; width: 3px; background: var(--cyan); border-radius: 3px;
+    height: 4px; animation: wave 1.2s ease-in-out infinite;
+  }
+  #waveform span:nth-child(1)  { animation-delay: 0s;    }
+  #waveform span:nth-child(2)  { animation-delay: .1s;   }
+  #waveform span:nth-child(3)  { animation-delay: .2s;   }
+  #waveform span:nth-child(4)  { animation-delay: .1s;   }
+  #waveform span:nth-child(5)  { animation-delay: .25s;  }
+  #waveform span:nth-child(6)  { animation-delay: .15s;  }
+  #waveform span:nth-child(7)  { animation-delay: .05s;  }
+  #waveform span:nth-child(8)  { animation-delay: .2s;   }
+  #waveform span:nth-child(9)  { animation-delay: .1s;   }
+  #waveform span:nth-child(10) { animation-delay: .3s;   }
+  #waveform span:nth-child(11) { animation-delay: .05s;  }
+  #waveform span:nth-child(12) { animation-delay: .15s;  }
+  @keyframes wave {
+    0%,100%{ height:4px }
+    50%    { height:24px }
+  }
+
+  /* Mic button */
+  #mic-btn {
+    width: 80px; height: 80px; border-radius: 50%;
+    border: none; cursor: pointer; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg3);
+    outline: none;
+    transition: transform .15s, box-shadow .3s;
+  }
+  #mic-btn::before {
+    content: '';
+    position: absolute; inset: -8px; border-radius: 50%;
+    border: 1.5px solid rgba(0,212,224,0.2);
+    animation: ring-idle 3s ease-in-out infinite;
+  }
+  #mic-btn::after {
+    content: '';
+    position: absolute; inset: -18px; border-radius: 50%;
+    border: 1px solid rgba(0,212,224,0.08);
+    animation: ring-idle 3s ease-in-out infinite .6s;
+  }
+  @keyframes ring-idle {
+    0%,100%{ opacity:.6; transform:scale(1)   }
+    50%    { opacity:.2; transform:scale(1.05) }
+  }
+  #mic-btn.listening {
+    background: rgba(0,212,224,0.12);
+    box-shadow: 0 0 0 0 rgba(0,212,224,0.4);
+    animation: mic-pulse 1s ease-out infinite;
+  }
+  #mic-btn.listening::before { border-color: rgba(0,212,224,.5); animation: ring-listen 1s ease-out infinite; }
+  #mic-btn.listening::after  { border-color: rgba(0,212,224,.25); animation: ring-listen 1s ease-out infinite .3s; }
+  @keyframes ring-listen {
+    0%  { opacity:1; transform:scale(1)    }
+    100%{ opacity:0; transform:scale(1.35) }
+  }
+  @keyframes mic-pulse {
+    0%  { box-shadow: 0 0 0 0   rgba(0,212,224,.4) }
+    100%{ box-shadow: 0 0 0 24px rgba(0,212,224,.0) }
+  }
+  #mic-btn.thinking {
+    background: rgba(124,92,252,0.12);
+    animation: spin-ring 1.2s linear infinite;
+  }
+  #mic-btn.thinking::before { border-color: rgba(124,92,252,.5); border-top-color: transparent; animation: spin-fast 1s linear infinite; }
+  #mic-btn.thinking::after  { display: none; }
+  @keyframes spin-ring { 0%{} 100%{} }
+  @keyframes spin-fast { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+
+  #mic-btn svg { width: 32px; height: 32px; pointer-events: none; }
+  #mic-btn.listening svg { color: var(--cyan); }
+  #mic-btn.thinking  svg { color: var(--purple); opacity: .6; }
+  #mic-btn:active { transform: scale(.94); }
+
+  #mic-label {
+    font-size: 13px; color: var(--muted); letter-spacing: .03em;
+    height: 18px; transition: color .3s;
+  }
+  #mic-label.listening { color: var(--cyan); }
+  #mic-label.thinking  { color: var(--purple); }
+
+  /* ── Interim text (shown while speaking) ── */
+  #interim {
+    width: 100%; min-height: 20px; padding: 0 4px;
+    font-size: 13px; color: rgba(0,212,224,0.6); text-align: center;
+    font-style: italic; transition: opacity .3s;
+  }
+
+  /* ── Fallback text input ── */
+  #text-row {
+    display: none; width: 100%; gap: 8px;
+  }
+  #text-row.visible { display: flex; }
+  #text-input {
+    flex: 1; background: var(--bg3); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 24px; padding: 10px 16px; color: var(--text); font-size: 14px;
+    outline: none;
+  }
+  #text-input:focus { border-color: rgba(0,212,224,0.3); }
+  #send-btn {
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(0,212,224,.15);
+    border: 1px solid rgba(0,212,224,.3); color: var(--cyan); font-size: 18px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── Speech not supported warning ── */
+  #no-speech-warn {
+    display: none; font-size: 12px; color: #ff9f43; text-align: center;
+    padding: 6px 12px; border-radius: 8px;
+    background: rgba(255,159,67,0.1); border: 1px solid rgba(255,159,67,0.2);
+  }
+
+  /* ── Browser banner ── */
+  #browser-banner {
+    display: none;
+    padding: 10px 16px; font-size: 13px; line-height: 1.5;
+    background: rgba(250,180,50,0.1); border-bottom: 1px solid rgba(250,180,50,0.2);
+    color: #fac832; text-align: center;
+  }
+  #browser-banner a {
+    color: #fac832; font-weight: 600; text-decoration: underline; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-dot"></div>
+      <div>
+        <div class="logo-text">AI 語音助理</div>
+        <div class="logo-sub">Raspberry Pi 5 · 本地 LLM</div>
+      </div>
+    </div>
+    <div id="status-badge">連線中</div>
+  </header>
+
+  <!-- Browser suggestion banner -->
+  <div id="browser-banner"></div>
+
+  <!-- Messages -->
+  <div id="messages">
+    <div id="empty-state">
+      <div class="hint-icon">🎙️</div>
+      <p>按下麥克風，用語音向 AI 提問</p>
+      <div class="hint-chips">
+        <div class="hint-chip" onclick="sendHint(this)">你的溫度是幾度？</div>
+        <div class="hint-chip" onclick="sendHint(this)">你是什麼型號的 AI？</div>
+        <div class="hint-chip" onclick="sendHint(this)">記憶體剩多少？</div>
+        <div class="hint-chip" onclick="sendHint(this)">你跑在什麼硬體上？</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mic area -->
+  <div id="mic-area">
+    <div id="waveform">
+      <span></span><span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span><span></span>
+    </div>
+
+    <button id="mic-btn" onclick="toggleMic()" aria-label="語音輸入">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3"/>
+        <path d="M5 10a7 7 0 0 0 14 0"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8"  y1="23" x2="16" y2="23"/>
+      </svg>
+    </button>
+
+    <div id="interim"></div>
+    <div id="mic-label">點擊說話</div>
+
+    <div id="no-speech-warn">
+      ⚠️ 瀏覽器不支援語音輸入，請改用文字
+    </div>
+    <div id="text-row">
+      <input id="text-input" type="text" placeholder="輸入文字..." onkeydown="if(event.key==='Enter')sendText()">
+      <button id="send-btn" onclick="sendText()">↑</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────
+let ws = null;
+let recognition = null;
+let isListening = false;
+let isThinking  = false;
+let currentAiBubble = null;
+let currentAiText   = '';
+
+const STATE = { IDLE:'idle', LISTENING:'listening', THINKING:'thinking' };
+let appState = STATE.IDLE;
+
+// ── WebSocket ─────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    setStatus('已連線', 'ok');
+    console.log('[WS] Connected');
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'token') {
+      onToken(msg.text);
+    } else if (msg.type === 'done') {
+      onDone();
+    } else if (msg.type === 'status') {
+      setStatus(msg.text, 'thinking');
+    } else if (msg.type === 'error') {
+      onError(msg.text);
+    } else if (msg.type === 'broadcast') {
+      onBroadcast(msg.text, msg.color);
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus('重新連線...', 'error');
+    setState(STATE.IDLE);
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    setStatus('連線錯誤', 'error');
+  };
+}
+
+function sendMessage(text) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'chat', text }));
+}
+
+// ── Browser detection ─────────────────────────────────────
+function checkBrowser() {
+  const ua       = navigator.userAgent;
+  const isIOS    = /iPhone|iPad|iPod/.test(ua);
+  const isAndroid= /Android/.test(ua);
+  const isChrome = /Chrome\//.test(ua) && !/Chromium|EdgA|OPR|SamsungBrowser/.test(ua);
+  const isHTTP   = location.protocol === 'http:';
+  const banner   = document.getElementById('browser-banner');
+
+  if (isHTTP) {
+    // 沒有 HTTPS — 語音一定不行，明確說明
+    banner.style.display = 'block';
+    banner.innerHTML = '⚠️ 需要 HTTPS 才能使用語音輸入。請確認已正確設定憑證，或改用下方文字輸入。';
+    document.getElementById('text-row').classList.add('visible');
+    return;
+  }
+
+  if (isAndroid && !isChrome) {
+    // Android 非 Chrome：嘗試自動跳轉
+    banner.style.display = 'block';
+    const chromeUrl = `intent://${location.host}${location.pathname}#Intent;scheme=https;package=com.android.chrome;end;`;
+    banner.innerHTML = `建議使用 Chrome 瀏覽器以獲得最佳語音體驗。
+      <a onclick="window.location.href='${chromeUrl}'">點此用 Chrome 開啟 ↗</a>`;
+  }
+
+  if (isIOS && isHTTP) {
+    // iOS + HTTP：明確說不支援
+    banner.style.display = 'block';
+    banner.innerHTML = '🔒 iOS 需要 HTTPS 才能使用語音功能。';
+  }
+  // iOS + HTTPS：Safari / Chrome 都支援，不需提示
+}
+
+// ── Speech Recognition ────────────────────────────────────
+function initSpeech() {
+  checkBrowser();
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    document.getElementById('no-speech-warn').style.display = 'block';
+    document.getElementById('text-row').classList.add('visible');
+    document.getElementById('mic-btn').style.opacity = '0.4';
+    document.getElementById('mic-btn').style.pointerEvents = 'none';
+    return;
+  }
+
+  recognition = new SR();
+  recognition.continuous    = false;
+  recognition.interimResults = true;
+  recognition.lang           = 'zh-TW';
+
+  recognition.onstart = () => {
+    setState(STATE.LISTENING);
+    document.getElementById('interim').textContent = '';
+  };
+
+  recognition.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    document.getElementById('interim').textContent = interim || final;
+    if (final) {
+      submitUserMessage(final.trim());
+    }
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'no-speech') {
+      setState(STATE.IDLE);
+      return;
+    }
+    if (e.error === 'not-allowed') {
+      setStatus('麥克風未授權', 'error');
+    }
+    setState(STATE.IDLE);
+  };
+
+  recognition.onend = () => {
+    if (appState === STATE.LISTENING) {
+      setState(STATE.IDLE);
+    }
+  };
+}
+
+function toggleMic() {
+  if (appState === STATE.THINKING) return;
+  if (appState === STATE.LISTENING) {
+    recognition && recognition.stop();
+    setState(STATE.IDLE);
+  } else {
+    try {
+      recognition && recognition.start();
+    } catch(e) { console.warn(e); }
+  }
+}
+
+// ── UI helpers ────────────────────────────────────────────
+function setState(s) {
+  appState = s;
+  const btn   = document.getElementById('mic-btn');
+  const label = document.getElementById('mic-label');
+  const wave  = document.getElementById('waveform');
+
+  btn.className   = s === STATE.IDLE ? '' : s;
+  label.className = s === STATE.IDLE ? '' : s;
+  wave.classList.toggle('active', s === STATE.LISTENING);
+
+  if (s === STATE.IDLE) {
+    label.textContent = '點擊說話';
+    document.getElementById('interim').textContent = '';
+  } else if (s === STATE.LISTENING) {
+    label.textContent = '聆聽中 — 說完自動送出';
+  } else if (s === STATE.THINKING) {
+    label.textContent = '思考中...';
+    document.getElementById('interim').textContent = '';
+  }
+}
+
+function setStatus(text, type) {
+  const el = document.getElementById('status-badge');
+  el.textContent = text;
+  el.className = type === 'error' ? 'error' : type === 'thinking' ? 'thinking' : '';
+}
+
+function hideEmptyState() {
+  const es = document.getElementById('empty-state');
+  if (es) es.remove();
+}
+
+function addBubble(role, text) {
+  hideEmptyState();
+  const msgs = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  const label = document.createElement('div');
+  const bubble = document.createElement('div');
+  label.className  = 'bubble-label';
+  label.textContent = role === 'user' ? '您' : 'AI 助理';
+  bubble.className  = `bubble ${role}`;
+  bubble.textContent = text;
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return bubble;
+}
+
+function submitUserMessage(text) {
+  if (!text || appState === STATE.THINKING) return;
+  addBubble('user', text);
+  currentAiBubble = addBubble('ai', '');
+  currentAiBubble.classList.add('streaming');
+  currentAiText = '';
+  setState(STATE.THINKING);
+  sendMessage(text);
+}
+
+function onToken(token) {
+  if (!currentAiBubble) return;
+  currentAiText += token;
+  currentAiBubble.textContent = currentAiText;
+  document.getElementById('messages').scrollTop = 9999;
+}
+
+function onDone() {
+  if (currentAiBubble) {
+    currentAiBubble.classList.remove('streaming');
+  }
+  currentAiBubble = null;
+  setState(STATE.IDLE);
+  setStatus('已連線', 'ok');
+}
+
+function onBroadcast(text, color) {
+  hideEmptyState();
+  const msgs = document.getElementById('messages');
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble broadcast';
+  bubble.textContent = '📢 ' + text;
+  msgs.appendChild(bubble);
+  msgs.scrollTop = 9999;
+  // 閃爍效果
+  bubble.style.opacity = '0';
+  requestAnimationFrame(() => {
+    bubble.style.transition = 'opacity .4s';
+    bubble.style.opacity = '1';
+  });
+}
+
+function onError(text) {
+  if (currentAiBubble) {
+    currentAiBubble.textContent = text;
+    currentAiBubble.classList.remove('streaming');
+    currentAiBubble.style.color = '#ff6b6b';
+  }
+  setState(STATE.IDLE);
+}
+
+// ── Text input fallback ───────────────────────────────────
+function sendText() {
+  const input = document.getElementById('text-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  submitUserMessage(text);
+}
+
+// ── Hint chips ────────────────────────────────────────────
+function sendHint(el) {
+  submitUserMessage(el.textContent);
+}
+
+// ── Init ─────────────────────────────────────────────────
+initSpeech();
+connect();
+</script>
+</body>
+</html>

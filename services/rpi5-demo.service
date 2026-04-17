@@ -1,0 +1,25 @@
+[Unit]
+Description=RPI5 AI 展示伺服器
+After=network-online.target NetworkManager-wait-online.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=p400
+WorkingDirectory=/home/p400/rpi5-demo
+ExecStart=/usr/bin/python3 /home/p400/rpi5-demo/server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 環境變數（可在此修改設定）
+Environment=PORT=8000
+Environment=N_THREADS=4
+Environment=N_CTX=2048
+# Environment=CHAT_FORMAT=chatml
+# Environment=EXTERNAL_URL=https://xxx.trycloudflare.com
+# Environment=MODEL_PATH=/home/p400/rpi5-demo/models/your-model.gguf
+
+[Install]
+WantedBy=multi-user.target
