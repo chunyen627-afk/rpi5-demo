@@ -191,11 +191,12 @@ sudo reboot
 【展示當天】開啟展示螢幕
 ----------------------------------------------------------------
 
-# 開啟 /display 頁面（Kiosk 全螢幕模式）
-./start_demo.sh
-
-# 或手動開啟（在 RPI5 有桌面的終端執行）
+# Server 由 systemd 自動管理，開機即啟動，只需手動開展示頁面
+# 在 RPI5 桌面的瀏覽器開啟以下網址即可（全螢幕 Kiosk 模式）：
 DISPLAY=:0 chromium-browser --kiosk --incognito --noerrdialogs http://localhost:8000/display &
+
+# 或在桌面瀏覽器直接輸入網址：
+# http://localhost:8000/display
 
 
 ----------------------------------------------------------------

@@ -6,7 +6,7 @@
 
 ## ✨ 功能特色
 
-- 🎙️ **手機語音輸入**：訪客掃 QR Code 即可用語音與 AI 對話
+- 🎙️ **語音 + 打字輸入**：訪客掃 QR Code 即可用語音或打字與 AI 對話
 - 🎨 **即時展示螢幕變色**：說「把背景改成紅色」，大螢幕背景立即漸變
 - 📢 **多人廣播**：顏色變更時所有連線手機同時收到通知
 - 🔒 **離線 HTTPS**：Let's Encrypt 憑證 + dnsmasq DNS，語音 API 正常運作
@@ -46,8 +46,7 @@ rpi5-demo/
 │   └── rpi5-demo.service  # systemd 服務設定
 ├── setup_system.sh        # 一鍵安裝（熱點 + 套件 + 自啟）
 ├── setup_https.sh         # HTTPS 安裝（nginx + dnsmasq）
-├── start_demo.sh          # 展場開機腳本（開啟 Kiosk 螢幕）
-└── gen_cert.sh            # Let's Encrypt 憑證產生（Mac/Linux 用）
+└── gen_cert.sh            # Let's Encrypt 憑證產生輔助（Mac/Linux 用）
 ```
 
 ---
@@ -83,7 +82,7 @@ sudo bash setup_system.sh
 
 ### 4. HTTPS 憑證設定
 
-**Windows 用戶：直接在 RPI5 上執行（不需要 gen_cert.sh）**
+**在 RPI5 上直接執行（Mac/Linux/Windows 都適用）**
 
 ```bash
 # 在 RPI5 上安裝 certbot
@@ -150,8 +149,8 @@ sudo systemctl restart rpi5-demo
 # 查看即時 Log
 sudo journalctl -u rpi5-demo -f
 
-# 開啟展示螢幕（Kiosk 模式）
-./start_demo.sh
+# 開啟展示螢幕（Kiosk 模式，在 RPI5 桌面執行）
+chromium-browser --kiosk --incognito http://localhost:8000/display
 
 # 手動測試（先停止背景服務避免 Port 衝突）
 sudo systemctl stop rpi5-demo
