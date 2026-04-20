@@ -130,38 +130,52 @@ def build_prompt(system_prompt: str, history: list[dict]) -> str:
 def parse_function_call(text: str) -> tuple[str, dict] | None:
     """
     解析 Gemma 輸出的 function call。
-    支援的格式：
-      1. ```python\nfunc_name(key="val")\n```
-      2. ```tool_code\nfunc_name(key="val")\n```
-      3. func_name(key="val")  （無程式碼區塊）
-    回傳：(function_name, arguments_dict) 或 None
+    支援官方微調模型的 <start_function_call> 格式，以及 Markdown 備用格式。
     """
-    # 從程式碼區塊提取
-    code_block = re.search(
-        r'```(?:python|tool_code)?\s*\n(.+?)\n```',
-        text, re.DOTALL | re.IGNORECASE
-    )
-    code = code_block.group(1).strip() if code_block else text.strip()
+    import re
+    import json
 
-    # 解析 function_name(key="value", key2="value2")
-    m = re.match(r'(\w+)\s*\((.*)?\)\s*$', code, re.DOTALL)
-    if not m:
+    content = text
+    # 1. 處理官方 <start_function_call> 標籤
+    if "<start_function_call>" in content:
+        content = content.split("<start_function_call>", 1)[1]
+    if "<end_function_call>" in content:
+        content = content.split("<end_function_call>", 1)[0]
+    content = content.strip()
+
+    if not content:
         return None
 
-    func_name = m.group(1)
-    args_str  = m.group(2).strip()
-    args: dict = {}
+    # 2. 嘗試解析 JSON 格式 (有些模型微調後會吐 JSON)
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and "name" in parsed:
+            return parsed.get("name"), parsed.get("arguments", {}) or {}
+    except json.JSONDecodeError:
+        pass
 
-    # 解析所有 key="value" 或 key='value'
-    for kv in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', args_str):
-        args[kv.group(1)] = kv.group(2)
-
-    # 若沒有 quoted string，嘗試解析 key=value（無引號）
-    if not args:
-        for kv in re.finditer(r'(\w+)\s*=\s*(\S+)', args_str):
-            args[kv.group(1)] = kv.group(2).rstrip(",)")
-
-    return (func_name, args) if func_name else None
+    # 3. 嘗試解析官方 declaration 格式: call:func_name{key:<escape>val<escape>}
+    m = re.match(
+        r"(?:functioncall:|declaration:|call:)?([A-Za-z_][A-Za-z0-9_]*)\s*\{(.*)\}\s*$",
+        content,
+        flags=re.DOTALL,
+    )
+    if m:
+        func_name = m.group(1)
+        body = m.group(2)
+        args = {}
+        # 提取 key:<escape>value<escape>
+        for km in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*<escape>(.*?)<escape>", body, flags=re.DOTALL):
+            args[km.group(1)] = km.group(2)
+        # 提取無 escape 的數字或布林值
+        for km in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+(?:\.\d+)?|true|false)\b", body):
+            k, v = km.group(1), km.group(2)
+            if k not in args:
+                if v == "true": args[k] = True
+                elif v == "false": args[k] = False
+                elif "." in v: args[k] = float(v)
+                else: args[k] = int(v)
+        return func_name, args
 
 def is_function_call(text: str) -> bool:
     """判斷輸出是否包含 function call"""
@@ -510,27 +524,19 @@ async def ws_handler(ws: WebSocket):
                                 )
                             })
 
-                            # ── 第二次推理（asyncio.to_thread，在 lock 內）────
-                            prompt2 = build_prompt(SYSTEM_PROMPT, history)
-                            try:
-                                r2 = await asyncio.to_thread(
-                                    LLM,
-                                    prompt2,
-                                    max_tokens=256,
-                                    temperature=TEMPERATURE,
-                                    stop=GEMMA_STOP,
-                                    echo=False,
-                                )
-                                final_text = r2["choices"][0]["text"].strip()
-                            except Exception as e:
-                                log.error(f"LLM second call error: {e}")
-                                final_text = result_msg   # fallback
-
-                            log.info(f"Final response: {final_text[:80]}")
+                            # ── 略過第二次推理，直接將系統結果回傳給用戶 ────────
+                            final_text = result_msg
+                            log.info(f"直接回覆用戶: {final_text}")
+                            
+                            # 逐字送出（模擬 AI 打字效果）
                             for char in final_text:
                                 await send({"type": "token", "text": char})
+                                await asyncio.sleep(0.02) # 加微小延遲讓 UI 動畫更自然
                             await send({"type": "done"})
-                            history.append({"role": "model", "content": final_text})
+                            
+                            # 歷史紀錄管理：記錄模型做了 Function Call，並記錄最終回覆
+                            history.append({"role": "model", "content": output1})
+                            history.append({"role": "assistant", "content": final_text})
 
                         else:
                             log.warning("Function call 解析失敗，直接回傳")
