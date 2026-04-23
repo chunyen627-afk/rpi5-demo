@@ -1,0 +1,313 @@
+================================================================
+  RPI5 AI 展示系統 — 指令速查表
+  路徑: /home/p400/rpi5-demo/
+  使用者: p400
+================================================================
+
+----------------------------------------------------------------
+【第一步】從電腦把專案傳到 RPI5（在你的電腦上執行）
+----------------------------------------------------------------
+
+# 傳整個資料夾
+scp -r rpi5-demo/ p400@rpi5-demo.local:/home/p400/
+
+# 或用 IP（若 .local 找不到）
+scp -r rpi5-demo/ p400@192.168.x.x:/home/p400/
+
+# 傳你的 GGUF 模型
+scp your-270m-model.gguf p400@rpi5-demo.local:/home/p400/rpi5-demo/models/
+
+
+----------------------------------------------------------------
+【第二步】SSH 進入 RPI5
+----------------------------------------------------------------
+
+ssh p400@rpi5-demo.local
+
+# 或
+ssh p400@192.168.x.x
+
+
+----------------------------------------------------------------
+【第三步】編譯 llama.cpp（取得最佳效能）
+----------------------------------------------------------------
+
+# 在 RPI5 上執行（約 10-15 分鐘）
+sudo apt install -y build-essential cmake git
+cd ~
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp
+cmake -B build -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j4
+
+# 確認執行檔
+ls -lh ~/llama/llama.cpp/build/bin/llama-server
+
+
+----------------------------------------------------------------
+【第四步】安裝系統（只需做一次）
+----------------------------------------------------------------
+
+cd /home/p400/rpi5-demo
+
+# 安裝：Python 套件 + llama-server 服務 + WiFi 熱點 + systemd 自啟 + 螢幕常亮
+sudo bash setup_system.sh
+
+# 編輯 llama-server 環境設定，指定 .gguf 路徑
+sudo nano /etc/default/llama-server
+# 修改 MODEL_PATH=/home/p400/rpi5-demo/models/your-model.gguf
+
+# 確認安裝結果
+pip show fastapi uvicorn httpx qrcode
+nmcli connection show rpi5-hotspot
+systemctl status llama-server
+systemctl status rpi5-demo
+
+
+----------------------------------------------------------------
+【第五步】確認模型已放好
+----------------------------------------------------------------
+
+ls -lh /home/p400/rpi5-demo/models/
+
+# 確認 system_prompt.txt 存在
+cat /home/p400/rpi5-demo/system_prompt.txt
+
+
+----------------------------------------------------------------
+【第六步】HTTPS 憑證設定（全部在 RPI5 上執行，只需一次）
+----------------------------------------------------------------
+
+# ─── Step 1: 安裝 certbot ───
+sudo apt update && sudo apt install -y certbot
+
+
+# ─── Step 2: 取得 DuckDNS token ───
+# 瀏覽器登入 https://www.duckdns.org
+# 複製頁面上方顯示的 token（格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
+
+
+# ─── Step 3: 執行 certbot 申請憑證 ───
+# email 請換成你自己的
+sudo certbot certonly \
+  --manual \
+  --preferred-challenges dns \
+  --agree-tos \
+  --email your@email.com \
+  -d rpi5demo.duckdns.org
+
+# 執行後 certbot 會暫停，顯示一串驗證碼，例如：
+#   with the following value:
+#   ABC123xyzDEF456uvw   ← 複製這串
+#   Press Enter to Continue   ← 先不要按！
+
+
+# ─── Step 4: 更新 DuckDNS TXT 紀錄（關鍵！）───
+# DuckDNS 網頁介面「沒有」TXT 編輯欄位，必須用 URL API 更新
+# 在瀏覽器打開以下網址（替換 token 和 txt 兩個參數）：
+
+https://www.duckdns.org/update?domains=rpi5demo&token=你的token&txt=certbot給的驗證碼
+
+# 瀏覽器顯示 OK 代表更新成功
+# 若顯示 KO 請檢查 token 和 domains 是否正確
+
+
+# ─── Step 5: 等 DNS 傳播，回 RPI5 按 Enter ───
+# 建議等 10-20 秒，可以另開終端確認 TXT 是否已生效：
+nslookup -type=TXT _acme-challenge.rpi5demo.duckdns.org 8.8.8.8
+
+# 看到驗證碼出現後，回到 certbot 終端按 Enter
+
+
+# ─── Step 6: 確認憑證產生成功 ───
+sudo ls -lh /etc/letsencrypt/live/rpi5demo.duckdns.org/
+
+# 檢查有效期
+sudo openssl x509 -enddate -noout \
+  -in /etc/letsencrypt/live/rpi5demo.duckdns.org/fullchain.pem
+
+
+# ─── Step 7: 設定 HTTPS 服務 ───
+# 先修改 setup_https.sh 裡的網域名稱
+nano /home/p400/rpi5-demo/setup_https.sh
+# 修改：DEMO_DOMAIN="rpi5demo.duckdns.org"
+
+sudo bash /home/p400/rpi5-demo/setup_https.sh
+
+
+----------------------------------------------------------------
+【憑證更新】Let's Encrypt 憑證 90 天後需更新
+----------------------------------------------------------------
+
+# 檢查剩餘天數
+sudo openssl x509 -enddate -noout \
+  -in /etc/letsencrypt/live/rpi5demo.duckdns.org/fullchain.pem
+
+# 重新申請（與初次申請指令相同）
+sudo certbot certonly \
+  --manual \
+  --preferred-challenges dns \
+  --agree-tos \
+  --email your@email.com \
+  -d rpi5demo.duckdns.org
+# certbot 會偵測到現有憑證，選 "2: Renew & replace the certificate"
+# 後續流程與初次申請相同：開瀏覽器更新 TXT、等 10 秒、按 Enter
+
+# 更新後重啟 nginx
+sudo systemctl restart nginx
+
+# 💡 建議：加行事曆提醒每 60 天檢查，提早 30 天更新避免過期
+
+
+----------------------------------------------------------------
+【第七步】測試（手動啟動，排除問題用）
+----------------------------------------------------------------
+
+# ⚠️  重要：先停止背景服務，避免 Port 8000 衝突
+sudo systemctl stop rpi5-demo
+
+# 手動啟動（可看到完整 Log）
+# 若要用自編 libllama.so，先設定環境變數
+export LLAMA_CPP_LIB=/home/p400/llama/llama.cpp/build/libllama.so
+cd /home/p400/rpi5-demo && python3 server.py
+
+# 另開一個終端確認可以連線
+curl http://localhost:8000/info
+
+# 測試完按 Ctrl+C 停止，再重啟背景服務
+sudo systemctl start rpi5-demo
+
+
+----------------------------------------------------------------
+【第八步】展示前確認清單
+----------------------------------------------------------------
+
+# 確認 GGUF 模型存在
+ls -lh /home/p400/rpi5-demo/models/
+
+# 確認憑證有效（不能過期）
+openssl x509 -enddate -noout -in /etc/letsencrypt/live/rpi5demo.duckdns.org/fullchain.pem
+
+# 確認服務正常運行
+systemctl status rpi5-demo
+
+# 確認 WiFi 熱點正常
+nmcli connection show rpi5-hotspot
+
+# 查看目前溫度（建議 < 70°C）
+vcgencmd measure_temp
+
+# 查看記憶體使用
+free -h
+
+# 查看連線人數與系統狀態
+curl http://localhost:8000/stats
+
+# 查看對外 URL
+curl http://localhost:8000/info
+
+# 重開機測試（確認開機自啟都正常）
+sudo reboot
+
+
+----------------------------------------------------------------
+【展示當天】開啟展示螢幕
+----------------------------------------------------------------
+
+# Server 由 systemd 自動管理，開機即啟動，只需手動開展示頁面
+# 在 RPI5 桌面的瀏覽器開啟以下網址即可（全螢幕 Kiosk 模式）：
+DISPLAY=:0 chromium-browser --kiosk --incognito --noerrdialogs http://localhost:8000/display &
+
+# 或在桌面瀏覽器直接輸入網址：
+# http://localhost:8000/display
+
+
+----------------------------------------------------------------
+【服務管理】
+----------------------------------------------------------------
+
+# 重啟服務
+sudo systemctl restart rpi5-demo
+
+# 停止服務
+sudo systemctl stop rpi5-demo
+
+# 啟動服務
+sudo systemctl start rpi5-demo
+
+# 即時查看 Log
+sudo journalctl -u rpi5-demo -f
+
+# 查看最近 50 行 Log
+sudo journalctl -u rpi5-demo --lines=50
+
+# 修改 llama.cpp 原始碼後重編 + 重啟
+cd ~/llama.cpp && cmake --build build --config Release -j4
+sudo systemctl restart rpi5-demo
+
+# 重啟 nginx（HTTPS）
+sudo systemctl restart nginx
+
+# 重啟 dnsmasq（DNS）
+sudo systemctl restart dnsmasq
+
+
+----------------------------------------------------------------
+【問題排除】
+----------------------------------------------------------------
+
+# Port 8000 已被佔用 → 停掉背景服務
+sudo systemctl stop rpi5-demo
+sudo fuser -k 8000/tcp
+
+# 確認 llama-cpp-python 載入的是哪個 .so
+python3 -c "import llama_cpp; print(llama_cpp.llama_cpp.lib)"
+
+# 確認 vendor/llama.cpp submodule 已抓下來
+ls ~/llama-cpp-python/vendor/llama.cpp/ | head -5
+# 若為空：cd ~/llama-cpp-python && git submodule update --init --recursive
+
+# Python 改了 llama.cpp 源碼但沒生效 → 沒重編 llama-cpp-python
+cd ~/llama-cpp-python
+CMAKE_ARGS="-DGGML_NATIVE=ON" \
+pip install --no-binary :all: --force-reinstall . --break-system-packages
+sudo systemctl restart rpi5-demo
+
+# 回退到 pip 預設版本（臨時 debug 用，非永久解法）
+pip install llama-cpp-python --force-reinstall --break-system-packages
+
+# WiFi 熱點沒啟動
+sudo nmcli connection up rpi5-hotspot
+
+# nginx 設定有問題
+sudo nginx -t
+sudo systemctl status nginx
+
+# 憑證快到期 → 詳見上方「憑證更新」章節
+
+# 查看 RPI5 IP
+hostname -I
+
+# 清除 Journal Log（SD 卡空間不足時）
+sudo journalctl --vacuum-size=50M
+
+
+----------------------------------------------------------------
+【附錄】WiFi 熱點資訊
+----------------------------------------------------------------
+
+SSID    : RPI5-Demo
+密碼    : demo1234
+RPI5 IP : 192.168.4.1
+伺服器  : http://192.168.4.1:8000
+展示頁  : http://192.168.4.1:8000/display
+
+
+----------------------------------------------------------------
+  最後更新：配合 server.py v2 / display.html 網頁變色版本
+================================================================
+
+
+
+# 查看即時 Log，並過濾 "Model output"
+sudo journalctl -u rpi5-demo.service -f | grep "Model output"
