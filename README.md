@@ -59,7 +59,6 @@ rpi5-demo/
 ├── system_prompt.txt       # 嚴格定義的系統提示詞與工具格式
 ├── rebuild_llama.sh        # llama-cpp-python 重編譯腳本（修改 C++ 源碼後用）
 ├── models/                 # 放置 .gguf 模型檔（伺服器自動偵測）
-│   └── README.md
 ├── templates/
 │   ├── index.html          # 訪客語音 UI（掃碼後在手機開啟）
 │   └── display.html        # 展示螢幕頁面（/display，接收即時顏色事件）
@@ -68,6 +67,7 @@ rpi5-demo/
 ├── setup_system.sh         # 一鍵安裝腳本（熱點 + Python 套件 + 開機自啟）
 ├── setup_https.sh          # HTTPS 設定腳本（nginx + dnsmasq）
 ├── RPI5_指令速查表.txt      # 所有常用指令一覽，可直接貼至終端機
+├── README.md
 └── 操作說明書_v2.docx      # 完整安裝與操作說明書
 ```
 
