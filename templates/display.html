@@ -38,6 +38,33 @@
     text-transform: uppercase;
   }
 
+  /* ── 結果卡片 overlay ── */
+  #result-overlay {
+    position: absolute; inset: 0; z-index: 110; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .4s;
+  }
+  #result-overlay.show { opacity: 1; }
+  #result-card {
+    min-width: 420px; max-width: 70%;
+    padding: 32px 44px; border-radius: 24px;
+    background: rgba(14, 22, 40, 0.92);
+    border: 2px solid rgba(0, 212, 224, 0.4);
+    box-shadow: 0 16px 60px rgba(0,0,0,.6), 0 0 40px rgba(0,212,224,.15);
+    backdrop-filter: blur(12px);
+    text-align: center;
+    transform: scale(0.9); transition: transform .4s cubic-bezier(.2,.9,.3,1.2);
+  }
+  #result-overlay.show #result-card { transform: scale(1); }
+  #result-title {
+    font-size: 20px; font-weight: 600; color: var(--cyan);
+    letter-spacing: .05em; margin-bottom: 12px;
+  }
+  #result-text {
+    font-size: 36px; font-weight: 700; color: var(--text);
+    line-height: 1.4; letter-spacing: .02em;
+  }
+
   /* ── 全版面 grid：左側說明 | 右側 QR ── */
   #layout {
     display: grid;
@@ -190,6 +217,12 @@
 <body>
 
 <div id="color-overlay"><span id="color-name"></span></div>
+<div id="result-overlay">
+  <div id="result-card">
+    <div id="result-title"></div>
+    <div id="result-text"></div>
+  </div>
+</div>
 <div id="layout">
 
   <!-- ── 左側說明 ── -->
@@ -333,6 +366,8 @@ const COLOR_CSS = {
   yellow: '#f39c12',
   purple: '#8e44ad',
   orange: '#d35400',
+  black:  '#1a1a1a',
+  white:  '#f5f5f5',
 };
 
 function connectDisplayWs() {
@@ -341,19 +376,28 @@ function connectDisplayWs() {
 
   dws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.type !== 'color_change') return;
-    const color  = msg.color;
-    const cssCol = COLOR_CSS[color] || '#1a1a2e';
+    if (msg.type === 'color_change') {
+      const color  = msg.color;
+      const cssCol = COLOR_CSS[color] || '#1a1a2e';
 
-    // 背景漸變
-    document.body.style.background = cssCol;
+      // 背景漸變
+      document.body.style.background = cssCol;
 
-    // 大字顯示顏色名稱
-    const overlay = document.getElementById('color-overlay');
-    const label   = document.getElementById('color-name');
-    label.textContent = color;
-    overlay.classList.add('show');
-    setTimeout(() => overlay.classList.remove('show'), 2000);
+      // 大字顯示顏色名稱
+      const overlay = document.getElementById('color-overlay');
+      const label   = document.getElementById('color-name');
+      label.textContent = color;
+      overlay.classList.add('show');
+      setTimeout(() => overlay.classList.remove('show'), 2000);
+    } else if (msg.type === 'result') {
+      // 顯示工具執行結果卡片
+      const overlay = document.getElementById('result-overlay');
+      document.getElementById('result-title').textContent = msg.title || '結果';
+      document.getElementById('result-text').textContent  = msg.text || '';
+      overlay.classList.add('show');
+      clearTimeout(window._resultTimer);
+      window._resultTimer = setTimeout(() => overlay.classList.remove('show'), 6000);
+    }
   };
 
   dws.onclose = () => setTimeout(connectDisplayWs, 3000);
