@@ -9,9 +9,11 @@
 #   4. 手機連熱點後，瀏覽器看到有效 HTTPS → 麥克風 API 開放
 #
 # 前置作業（只需一次，需要有網路的環境下做）：
-#   1. 準備一個你擁有的網域（或免費申請）
-#   2. 執行 ./gen_cert.sh 產生憑證
-#   3. 憑證有效期 90 天，到期前重新執行一次
+#   1. 準備一個你擁有的網域（推薦免費的 DuckDNS）
+#   2. 在 RPI5 上執行 certbot 產生憑證（詳見說明書 4.4 節）
+#   3. 憑證有效期 90 天，到期前需重新執行
+#
+# 前提：setup_system.sh 已執行過（含 Python 套件與 llama-cpp-python）
 #
 # 執行：
 #   sudo bash setup_https.sh
@@ -44,24 +46,19 @@ echo "▶ [1/6] 安裝系統套件"
 apt-get update -q
 apt-get install -y nginx dnsmasq certbot python3-certbot-dns-cloudflare -q 2>/dev/null \
   || apt-get install -y nginx dnsmasq certbot -q
-pip install fastapi uvicorn qrcode[pil] pillow --break-system-packages -q
-CMAKE_ARGS="-DGGML_NATIVE=ON -DGGML_NEON=ON" \
-pip install llama-cpp-python --break-system-packages -q
-echo "  ✓"
+# 注意：不在此安裝 llama-cpp-python，避免覆蓋使用者自行編譯的版本
+# Python 套件應由 setup_system.sh 先安裝完成
+echo "  ✓ 套件安裝完成（nginx + dnsmasq + certbot）"
 
-# ── 2. WiFi 熱點 ───────────────────────────────────────────
+# ── 2. 確認 WiFi 熱點已存在（由 setup_system.sh 建立）──────
 echo ""
-echo "▶ [2/6] 設定 WiFi 熱點"
-nmcli connection delete "rpi5-hotspot" 2>/dev/null || true
-nmcli connection add \
-  type wifi ifname wlan0 con-name "rpi5-hotspot" \
-  ssid "$HOTSPOT_SSID" mode ap autoconnect yes \
-  ipv4.method shared ipv4.addresses "$HOTSPOT_IP/24" \
-  wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASS" \
-  802-11-wireless.band bg 802-11-wireless.channel 6
-nmcli connection modify "rpi5-hotspot" \
-  connection.autoconnect yes connection.autoconnect-priority 100
-echo "  ✓ SSID=$HOTSPOT_SSID"
+echo "▶ [2/6] 確認 WiFi 熱點"
+if nmcli connection show "rpi5-hotspot" &>/dev/null; then
+    echo "  ✓ 熱點已存在（rpi5-hotspot）"
+else
+    echo "  ⚠️  找不到熱點設定，請先執行 setup_system.sh"
+    exit 1
+fi
 
 # ── 3. dnsmasq — 本機 DNS 欺騙 ────────────────────────────
 echo ""
@@ -103,7 +100,7 @@ if [ ! -f "$CERT_PATH" ]; then
     echo "  請先在「有網路的環境」執行以下指令產生憑證："
     echo ""
     echo "  ─────────────────────────────────────────────"
-    echo "  # 方法 1：Cloudflare DNS（最方便）"
+    echo "  # 方法：手動 DNS 驗證（適用 DuckDNS 等任何 DNS 服務）"
     echo "  certbot certonly --dns-cloudflare \\"
     echo "    --dns-cloudflare-credentials ~/.secrets/cloudflare.ini \\"
     echo "    -d $DEMO_DOMAIN"
@@ -116,7 +113,7 @@ if [ ! -f "$CERT_PATH" ]; then
     echo "  產生後把整個 /etc/letsencrypt/ 資料夾複製到 RPI5，"
     echo "  然後重新執行這個安裝腳本。"
     echo ""
-    echo "  或用 setup_https.sh 中的 gen_cert.sh 輔助腳本。"
+    echo "  RPI5 直接申請的方式："
     echo ""
 
     # 臨時用自簽憑證撐著（手機會有警告，但功能可以先測）
